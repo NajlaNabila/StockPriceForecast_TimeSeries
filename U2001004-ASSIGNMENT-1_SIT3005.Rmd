@@ -1,6 +1,6 @@
 ---
 title: "Stock Price Forecasting on C3.AI (March 2023- Sept 2023)"
-author: "Nur Najla Nabila bt Azman (u2001004)"
+author: "Nur Najla Nabila bt Azman"
 date: "16/11/2023"
 output:
   word_document: default
