@@ -1,0 +1,165 @@
+---
+title: "Stock Price Forecasting on C3.AI (March 2023- Sept 2023)"
+author: "Nur Najla Nabila bt Azman (u2001004)"
+date: "16/11/2023"
+output:
+  word_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+a) Data Preparation
+
+The stock price of C3 AI was downloaded from the Yahoo Finance website from 1 March 2023 to 21 September 2023 and imported into R using the code below.
+
+```{r echo=T, message=FALSE, warning=FALSE, result='hide'}
+library(fpp3)
+library(readr)
+AI <- read_csv("C:/Users/Asus/Downloads/C3.AI.csv")
+```
+
+Then, the data has been changed into the tsibble format with index= day where day is the number of the trading days.
+
+```{r echo=T, message=FALSE, warning=FALSE, result='hide'}
+AI <- AI |> mutate (day= row_number()) |> as_tsibble(index=day)
+```
+
+Next, the data has been extracted into 2 data frames. The mac_aug data frame was for the  stock price from 1 March 2023 to 31 August 2023. The sept data frame was for the stock price from 1 September 2023 to 21 September 2023 that will be used for forecasting later.
+
+```{r message=FALSE, warning=FALSE}
+mac_aug <- AI|> filter(month(Date)<09)
+head(mac_aug)
+sept <- AI |> filter(month(Date)==09)
+head(sept)
+```
+
+b) Time Series Plot
+
+The closing price for C3.AI's stock from March to August has been plot using the autoplot function. From the plot, we can see an increasing trend with a strong drop at day 44. The plot also shows cyclicity and no seasonality.
+
+```{r message=FALSE, warning=FALSE}
+plot_mac_aug <- autoplot(mac_aug,Close) + labs(y="$US", x="Trading Day", title="C3.ai Daily Closing Stock Price", subtitle="March 2023 - Aug 2023")
+plot_mac_aug
+```
+
+The ACF plot has also been plotted to help identify the existence of trend from the data. From the plot, it shows that the data does have strong trend since the ACF is decreasing as lag increasing with no seasonality since the plot does not shows "scalloped" pattern.
+
+```{r message=FALSE, warning=FALSE}
+mac_aug |> ACF(Close)|>autoplot()
+```
+
+5-MA,Moving average has also been implemented using the slider package and plot onto the time series plot to give a clearer view of cycle-trend.
+
+```{r message=FALSE, warning=FALSE}
+library(slider)
+```
+```{r message=FALSE, warning=FALSE}
+ma <- mac_aug |> mutate( MA = slide_dbl(Close, mean,.before=2,.after=2,.complete=T))
+ma_plot <- ma |> autoplot(Close) + geom_line(aes(y=MA),colour = "#D55E00")+ labs(y="$US", title="C3.ai Daily Closing Stock Price", subtitle="March 2023 - Aug 2023")+guides(colour = guide_legend(title = "series"))
+ma_plot
+```
+
+c)Analyzing Historical Data of NYSE 
+
+The historical data of NYSE from 1 January 2015 to 31 August 2023 has been imported into R using the code below.
+
+```{r message=FALSE, warning=FALSE}
+NYSE <- read_csv("C:/Users/Asus/Downloads/^NYA.csv")
+```
+
+Then, the daily and monthly returns has been calculated to check the seasonality.
+
+```{r message=FALSE, warning=FALSE}
+library(tidyquant)
+```
+```{r}
+
+#Calculate Daily Returns
+nyse_daily_return <- NYSE |> tidyquant::tq_transmute(select = Close, 
+                                                     mutate_fun=periodReturn,
+                                                     period="daily",
+                                                     col_rename="daily_returns")
+
+#Calculate monthly returns
+nyse_monthly_return <- NYSE |> tidyquant::tq_transmute(select=Close,
+                                                       mutate_fun=periodReturn,
+                                                       period="monthly",
+                                                       col_rename="monthly_returns")
+#change to tsibble
+nyse_return <- nyse_monthly_return |> mutate(Month=yearmonth(Date)) |> select(-Date,Month,monthly_returns)|> as_tsibble(index=Month)
+
+head(nyse_return)
+```
+
+The following plots was produces to check the seasonality
+
+```{r message=FALSE, warning=FALSE}
+#time series plot
+autoplot(nyse_return,monthly_returns) + labs(title="NYSE Monthly Returns",subtitle= "Jan 2015 - Aug 2023", y="Monthly returns",x="Month")
+
+#ggseason
+gg_season(nyse_return,monthly_returns) +labs(title="NYSE Monthly Returns",subtitle= "Jan 2015 - Aug 2023", y="Monthly returns",x="Month")
+
+#ACF Plot
+nyse_return |> ACF(monthly_returns) |> autoplot()+ labs(title="ACF Plot for NYSE Monthly Returns")
+
+```
+
+
+d) Forecasting
+i) Training and Test Set
+
+To select the best forecasting method, the data set has been split into training and test set using 8:2 ratio. The training data set was set from 1 March 2023 to 26 July 2023 which is from day 1 to day 102 while the test set was from 27 July 2023 to 31 August 2023.
+
+```{r message=FALSE, warning=FALSE}
+train <- mac_aug |> filter(day<=102)
+head(train)
+test <- mac_aug |> filter(day>102)
+head(test)
+```
+
+Training set was used to forecast the test set using the 3 basic forecasting method which are Mean, Naive, and Drift method. Snaive method was not suitable to used in this stock price dataset as this dataset does not have seasonality. 
+
+```{r message=FALSE, warning=FALSE}
+fit_AI <- train |> model(mean=MEAN(Close),naive=NAIVE(Close),drift =RW(Close~drift()))
+fc_AI <- fit_AI|> forecast(new_data=test)
+fc_AI |> autoplot(train)+ autolayer(test,Close,colour="black") +
+  labs(y = "$US", x="Trading Day",
+       title = "Forecast Test Dataset over Training Dataset",
+       subtitle = "(March 2023 - Aug 2023)") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+
+The accuracy has been checked from the testing set. From the MAE and RMSE values, Mean method is the best forecasting method since the MAE and RMSE values are the lowest. However the value of ACF of Mean and Naive forecasting method are the same.
+
+```{r message=FALSE, warning=FALSE}
+accuracy(fc_AI,mac_aug)
+```
+
+
+Then, I plot the residual plot to see the assumptions of the residual for Mean and Naive method. From the residual plot for mean method, the residual series are correlated and the mean is not zero. However, the residual plot for Naive method shows that residuals are uncorrelated and the mean is close to zero. Hence, Naive method might be the best forecasting method.
+
+```{r message=FALSE, warning=FALSE}
+train |> model(MEAN(Close)) |> gg_tsresiduals()+ labs(title="Residuals from the Mean method")
+train |> model(NAIVE(Close)) |> gg_tsresiduals()+ labs(title="Residuals from the Naive method")
+```
+
+The ljung box test was used to test for the autocorelation of the residual for Naive method model.Since p-value is more than 0.05. we do not reject null hypothesis where the residuals shows white noise (uncorrelated). Hence, the Naive method is concluded as the best forecasting method.
+
+
+```{r message=FALSE, warning=FALSE}
+aug <- train |> model(NAIVE(Close)) |> augment()
+aug |> features(.innov,ljung_box,lag=10)
+```
+
+ii) The Naive forecasting method was used to forecast the stock price from 1 September 2023 to 21 September 2023 (14 trading days).
+
+```{r message=FALSE, warning=FALSE}
+fit <- mac_aug |> model(NAIVE(Close))
+fit |> forecast(h=14)|> autoplot(mac_aug) + autolayer(sept,Close,colour="black") +
+  labs(y = "$US", x= "Trading Day",
+       title = "Forecast on 14 Trading Days of C3.AI Stock Price",
+       subtitle = "(1 March 2023 - 21 Sept 2023)") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
